@@ -1002,8 +1002,8 @@
   \global\@acmtompecsfalse
   \global\@acmtcpsfalse
   \global\@acmtscfalse
-  \def\@journalName{ACM Transactions on Embedded Computing Systems}
-  \def\@journalNameShort{ACM Trans. Embedd. Comput. Syst.}
+  \def\@journalName{ACM Transactions on Storage}
+  \def\@journalNameShort{ACM Trans. Stor.}
   \def\@journalCode{tecs}
   \def\@permissionCodeOne{1539-9087} 
 }

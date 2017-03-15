@@ -27,11 +27,11 @@
 
 
 % Metadata Information
-\acmVolume{9}
-\acmNumber{4}
-\acmArticle{39}
-\acmYear{2010}
-\acmMonth{3}
+\acmVolume{13}
+\acmNumber{2}
+\acmArticle{1}
+\acmYear{2017}
+\acmMonth{7}
 
 % Copyright
 \setcopyright{rightsretained}
@@ -47,17 +47,17 @@
 \markboth{J. Ma et al.}{Lazy Exact Deduplication}
 
 \title{Lazy Exact Deduplication}
-\author{Jingwei Ma, Rebecca J. Stones, Yuxiang Ma, Jingui Wang, Junjie Ren, Gang Wang\Envelope, Xiaoguang Liu\Envelope
+\author{Jingwei Ma, Rebecca J. Stones, Yuxiang Ma, Jingui Wang, Junjie Ren, Gang Wang*, Xiaoguang Liu*
 \affil{College of Computer and Control Engineering, Nankai University}}
 
 \begin{abstract}
 Deduplication aims to reduce duplicate data in storage systems by removing redundant copies of data blocks, which are compared to one another using fingerprints.  However, repeated on-disk fingerprint lookups lead to high disk traffic, which results in a bottleneck.
 
-In this paper, we propose a ``lazy'' data deduplication method which buffers incoming fingerprints which are used to perform on-disk lookups in batches, with the aim of improving subsequent prefetching. In deduplication in general, prefetching is used to improve the cache hit rate by exploiting locality within the incoming fingerprint stream. For lazy deduplication, we design a buffering strategy that preserves locality in order to facilitate prefetching.  Furthermore, as the proportion of deduplication time spent on I/O decreases, the proportion spent on fingerprint calculation and chunking increases.  Thus, we also utilize parallel approaches (utilizing multiple CPU cores and a graphics processing unit) to further improve the overall performance.
+In this article, we propose a ``lazy'' data deduplication method which buffers incoming fingerprints which are used to perform on-disk lookups in batches, with the aim of improving subsequent prefetching. In deduplication in general, prefetching is used to improve the cache hit rate by exploiting locality within the incoming fingerprint stream. For lazy deduplication, we design a buffering strategy that preserves locality in order to facilitate prefetching.  Furthermore, as the proportion of deduplication time spent on I/O decreases, the proportion spent on fingerprint calculation and chunking increases.  Thus, we also utilize parallel approaches (utilizing multiple CPU cores and a graphics processing unit) to further improve the overall performance.
 
-Experimental results indicate that the lazy method improves fingerprint identification performance by over $50\%$ compared with an ``eager'' method with the same data layout.  The GPU improves the hash calculation by a factor of around 4.6 and multi-threaded chunking by a factor of around 4.16. Deduplication performance can be improved by over $45\%$ on SSD and $80\%$ on HDD in the last round on the real data sets.
+Experimental results indicate that the lazy method improves fingerprint identification performance by over $50\%$ compared with an ``eager'' method with the same data layout.  The GPU improves the hash calculation by a factor of 4.6 and multi-threaded chunking by a factor of 4.16. Deduplication performance can be improved by over $45\%$ on SSD and $80\%$ on HDD in the last round on the real data sets.
 
-This paper is an extended version of \cite{ma2010towards} which was presented at the MSST conference in 2016.
+This article is an extended version of \cite{ma2016lazy} which was presented at the MSST conference in 2016.
 \end{abstract}
 
 
@@ -93,10 +93,10 @@ This paper is an extended version of \cite{ma2010towards} which was presented at
 \keywords{Deduplication, Lazy method, GPU, Disk I/O}
 
 \acmformat{Jingwei Ma, Rebecca J. Stones, Yuxiang Ma, Jingui Wang, Junjie Ren, Gang Wang,
-and Xiaoguang Liu, 2016. Lazy Exact Deduplication.}
+and Xiaoguang Liu, 2017. Lazy Exact Deduplication.}
 
 \begin{bottomstuff}
-This work is partially supported by NSF of China (grant numbers: 61373018, 11301288, 11550110491, 61379146, 61272483), Program for New Century Excellent Talents in University (grant number: NCET130301), the Fundamental Research Funds for the Central Universities (grant number: 65141021) and the Ph.D. Candidate Research Innovation Fund of Nankai University.
+This work is partially supported by NSF of China (grant numbers: 61373018, 61602266, 11550110491), the Natural Science Foundation of Tianjin and the Ph.D. Candidate Research Innovation Fund of Nankai University.
 
 Author's addresses: J. Ma, R. J. Stones, Y. Ma, J. Wang, J. Ren, G. Wang, X. Liu, College of Computer and Control Engineering, Nankai University.
 \end{bottomstuff}
@@ -105,50 +105,50 @@ Author's addresses: J. Ma, R. J. Stones, Y. Ma, J. Wang, J. Ren, G. Wang, X. Liu
 
 \section{Introduction}
 
-Data deduplication is a key technology in data backup. By eliminating redundant data blocks and replacing them with references to the corresponding unique ones, we can reduce storage requirements. Many companies have backup systems utilizing deduplication~\cite{Paulo2014survey,Meyer2012,quinlan2002venti,zhu2008avoiding,lin2015using}. Deduplication is able to reduce storage requirements by around 83\%, and around 68\% in primary storage~\cite{meyer2011study}.
+Data deduplication is a key technology in data backup. By eliminating redundant data blocks and replacing them with references to the corresponding unique ones, we can reduce storage requirements. Many companies have backup systems utilizing deduplication~\cite{Paulo2014survey,Meyer2012,quinlan2002venti,zhu2008avoiding,lin2015using}. Deduplication is able to reduce storage requirements by 83\%, and 68\% in primary storage~\cite{meyer2011study}.
 
-In a typical deduplication procedure, a data stream is segmented into chunks and a cryptographic hash (e.g.\ MD5, SHA1, SHA256) is calculated as the \emph{fingerprint} of each chunk. The system determines whether a data chunk is redundant by comparing fingerprints instead of whole chunks.  In a usual deduplication implementation, when encountering an uncached fingerprint, the system immediately reads the disk to search for the fingerprint.  Each on-disk lookup searches for only a single fingerprint, and if discovered, prefectching is triggered.  We will refer to this method as the \emph{eager} method.
+In a typical deduplication procedure, a data stream is segmented into chunks and a cryptographic hash (e.g.,\ MD5, SHA1, SHA256) is calculated as the \emph{fingerprint} of each chunk. The system determines whether a data chunk is redundant by comparing fingerprints instead of whole chunks.  In a usual deduplication implementation, when encountering an uncached fingerprint, the system immediately reads the disk to search for the fingerprint.  Each on-disk lookup searches for only a single fingerprint, and if discovered, prefectching is triggered.  We will refer to this method as the \emph{eager} method.
 
-In this paper, we propose a \emph{lazy} deduplication method, which buffers fingerprints in memory organized into hash buckets.  When the number of fingerprints in a hash bucket reaches a user-defined threshold $T$, the system reads the disk and searches for those fingerprints together. Importantly, the lazy method performs a single on-disk lookup for $T$ fingerprints. This reduces the disk access time for on-disk fingerprint lookups. Though the cache lookup strategy proposed in this paper works better in terms of backup flow, the lazy method is suitable for both primary workloads and backup workloads.
+In this article, we propose a \emph{lazy} deduplication method, which buffers fingerprints in memory organized into hash buckets.  When the number of fingerprints in a hash bucket reaches a user-defined threshold $T$, the system reads the disk and searches for those fingerprints together. Importantly, the lazy method performs a single on-disk lookup for $T$ fingerprints. This reduces the disk access time for on-disk fingerprint lookups. Though the cache lookup strategy proposed in this article works better for backup flows, the lazy method is suitable for both primary workloads and backup workloads.
 
 Computation and disk I/O are the two most time-consuming components of data deduplication. As we improve the procedure to reduce the disk I/O, the proportion of time spent on computation becomes the dominating factor.  As such, we further propose a parallel approach to improve computation in lazy deduplication.  The proposed approach includes pipelining and multi-threading processes on both the CPU and graphics processing unit (GPU), balancing the workloads to optimize performance.
 
-This paper extends an MSST 2016 conference paper~\cite{ma2016lazy} by the present authors. Additional contributions include:
+This article extends an MSST 2016 conference paper~\cite{ma2016lazy} by the present authors. Additional contributions include:
 
 \begin{itemize}
 \item We describe, implement, and experiment with lazy deduplication on multi-core hardware, with the aim of accelerating the computational tasks in data deduplication, including a graphics processing unit (GPU) and multi-core CPU.  We optimize and achieve load balance by distributing different tasks at different data granularity to the CPU and GPU, which we utilize through pipelining.
-\item We perform experiments to test the impact of the Bloom filter buffer size on its false positive rate.  We further examine the effect of the false positive rate on the on-disk lookup time and prefetching time, as well as the total deduplication time (see Table~\ref{tab:bloom-filter}).
+\item We perform experiments to test the impact of the Bloom filter buffer size on its false positive rate.  We further examine the effect of the false positive rate on the on-disk lookup time and prefetching time, as well as the total deduplication time.
 
 \end{itemize}
 
-The paper is organized as follows: We survey related work in Section~\ref{se:back}.  Section~\ref{sec:idea} describes the overall idea of the proposed lazy method and the arising challenges. Section~\ref{sec:prototype} shows the prototype implementation and how we combine the optimization methods to achieve load balance. We give experimental results in Section~\ref{sec:evaluation} and summarize the paper and suggest future work in Section~\ref{sec:conclusion}.
+The article is organized as follows: We survey related work in Section~\ref{se:back}.  Section~\ref{sec:idea} describes the overall idea of the proposed lazy method and the arising challenges. Section~\ref{sec:prototype} shows the prototype implementation and how we combine the optimization methods to achieve load balance. We give experimental results in Section~\ref{sec:evaluation} and summarize the article and suggest future work in Section~\ref{sec:conclusion}.
 
 
 \section{Background and related work}\label{se:back}
 
-Data deduplication is used to reduce storage requirements, and consequently also reduces network data transfers in storage systems.  This reduces hardware costs and improves the system's online performance.  However, performing deduplication is both (a) computationally intensive, due to chunking, fingerprint calculation, compression, and so on, and (b) I/O intensive, since we are required to compare a large number of fingerprints in order to identify and eliminate redundant data.
+Data deduplication is used to reduce storage requirements, and consequently also reduces network data transfers in storage systems.  This reduces hardware costs and improves the system's online performance. However, performing deduplication is both (a) computationally intensive, due to chunking, fingerprint calculation, compression, and (b) I/O intensive, since we are required to compare a large number of fingerprints in order to identify and eliminate redundant data.
 
-For large-scale deduplication systems, the main memory is not large enough to hold all the fingerprints, so most fingerprints are stored on disk, a \emph{disk bottleneck} which can significantly affect throughput. The disk bottleneck has an increasing effect as the data size (and hence the number of fingerprints) grows, whereas calculation time usually remains stable.  As a result, most previous work focused on eliminating the disk bottleneck in deduplication.  While the disk bottleneck can be reduced by $99\%$ in some exact deduplication systems \cite{zhu2008avoiding}, it remains a bottleneck.  Our goal is to further reduce this component by combining several fingerprint lookups into a single disk access, to the point where computation time becomes a more prominent factor.
+For large-scale deduplication systems, the main memory is not large enough to hold all the fingerprints, so most fingerprints are stored on disk, creating a \emph{disk bottleneck} which can significantly affect throughput. The disk bottleneck has an increasing effect as the data size (and hence the number of fingerprints) grows, whereas calculation time usually remains stable. As a result, most previous work focused on eliminating the disk bottleneck in deduplication.  While the disk bottleneck can be reduced by $99\%$ in some exact deduplication systems \cite{zhu2008avoiding}, it remains a bottleneck.  Our goal is to further reduce this component by combining several fingerprint lookups into a single disk access, to the point where computation time becomes a more prominent factor.
 
 Real-world data will often have ``locality'' properties, where data blocks that occur together do so repeatedly.  Deduplication systems take advantage of locality properties in data streams to reduce disk accesses by using an in-memory cache~\cite{zhu2008avoiding,guo2011building,lillibridge2009sparse,bhagwat2009extreme,xia2011silo,srinivasan2012idedup,Botelho2013fast}.  When a fingerprint is found on disk, \emph{prefetching} is invoked, whereby adjacent fingerprints stored on disk are transferred to the cache. As fingerprints frequently arrive in the same order as they arrived previously (and therefore the same order as they are stored on the disk), this prefetching strategy leads to a high cache hit rate which significantly reduces disk access time.
 
 There are many other optimized techniques used in deduplication systems, such as delta compression~\cite{Shilane2012WanOpt}, optimized read~\cite{Ng2013RevDedup,Mao2014readOpt}, data mining~\cite{Fu2014ATC}, separating metadata from data~\cite{Lin2015hotstorage}, reducing data placement de-linearization~\cite{Tan2015defrag}, and exploiting similarity and locality of data streams~\cite{Xia2015}.
 
-A \emph{Bloom filter}~\cite{bloom1970space,bose2008false} is a data structure which can be used to quickly probabilistically determine set membership; false positives are possible but not false negatives.  They are widely used in deduplication systems to quickly filter out unique fingerprints, and we incorporate a Bloom filter into the lazy method.  The Data Domain File System~\cite{zhu2008avoiding} uses a Bloom filter, stream-informed segment layout, and a locality preserving cache, together reducing the disk I/O for index lookup by around $99\%$. The lazy method uses similar data structures but different fingerprint identification process.
+A \emph{Bloom filter}~\cite{bloom1970space,bose2008false} is a data structure which can be used to quickly probabilistically determine set membership; false positives are possible but not false negatives. It is widely used in deduplication systems to quickly filter out unique fingerprints, and we incorporate a Bloom filter into the lazy method.  The Data Domain File System~\cite{zhu2008avoiding} uses a Bloom filter, stream-informed segment layout, and a locality preserving cache, together reducing the disk I/O for index lookup by $99\%$. The lazy method uses similar data structures but different fingerprint identification process.
 
 Other work proposes improving the performance of data deduplication by accelerating some computational sub-tasks. A \emph{graphics processing unit} (GPU) is a commonly used many-core co-processor, and researchers have used GPUs to improve deduplication performance. Debnath et al.~\cite{bhatotia2012shredder} used a GPU to accelerate the chunking process while Li and Lilja~\cite{li2009highly} used it to accelerate hash calculation.  Ma et al.~\cite{ma2010towards} used the PadLock engine on a VIA CPU~\cite{via} to accelerate SHA1 (fingerprint) and AES (encryption) calculation.  Incremental Modulo-K was proposed by Jaehong et al.~\cite{min2011efficient} for chunking instead of Rabin Hash~\cite{rabin1981fingerprinting}.  Bhatotia et al.~\cite{bhatotia2012shredder} performed content-based chunking process on GPU using CUDA~\cite{cuda}.
 
-In this work, we accelerate SHA1 calculation (used as the chunk fingerprint) using a simple method on the GPU, which we find is sufficient for our prototype to achieve load balance.  We acknowledge that more sophisticated methods could potentially improve GPU hash function calculation, which would reduce the impact of this component, but we consider this task beyond the scope of this paper.
+In this work, we accelerate SHA1 calculation (used as the chunk fingerprint) using a simple method on the GPU, which we find is sufficient for our prototype to achieve load balance.  We acknowledge that more sophisticated methods could potentially improve GPU hash function calculation, which would reduce the impact of this component, but we consider this task beyond the scope of this article.
 
-Another buffering approach was proposed by Clements et al.~\cite{clements2009decentralized}, who presented a decentralized deduplication method for a SAN cluster.  They buffer updates (primarily new writes) and applies them ``out of band'' in batches. They focus on write performance rather than the disk bottleneck, and do not include the cache lookup problem when buffering fingerprints.
+Another buffering approach was proposed by Clements et al.~\cite{clements2009decentralized}, who presented a decentralized deduplication method for a SAN cluster.  They buffer updates (primarily new writes) and apply them ``out of band'' in batches. They focus on write performance rather than the disk bottleneck, and do not include the cache lookup problem when buffering fingerprints.
 
-In addition, there are a range of alternative software and/or hardware approaches to improve deduplication, of which we list some examples.  IDedup~\cite{srinivasan2012idedup} is an example of primary deduplication (i.e., deduplication applied to primary workloads) reduces fragments by selectively deduplicating sequences of disk blocks. I/O deduplication~\cite{koller2010i/o} introduces deduplication into the I/O path, with the result of reducing the amount of data written to disk, thereby reducing the number of physical disk operations.
+In addition, there are a range of alternative software and/or hardware approaches to improve deduplication, of which we list some examples.  IDedup~\cite{srinivasan2012idedup} is an example of primary deduplication (i.e., deduplication applied to primary workloads) which reduces fragments by selectively deduplicating sequences of disk blocks. I/O deduplication~\cite{koller2010i/o} introduces deduplication into the I/O path, with the result of reducing the amount of data written to disk, thereby reducing the number of physical disk operations.
 
 
 Storing fingerprints on solid-state drives SSDs (instead of hard disk drives) can also improve fingerprint lookup throughput~\cite{kim2011rethinking,Kim2012SSD}.  Dedupv1~\cite{meister2010dedupv1} was designed to take advantage of the ``sweet spots'' of SSD technology (random reads and sequential operations).  ChunkStash~\cite{debnath2010chunkstash} also was designed as an SSD-based deduplication system and uses Cuckoo Hashing~\cite{pagh2001cuckoo} to resolve collisions.  SkimpyStash~\cite{debnath2011skimpystash} is a Key-Value Store which uses the SSD to store the Key-Value pairs.  We also investigate the effect of SSDs vs.\ HDDs in lazy deduplication.  Additionally, deduplication also benefits SSDs in several aspects, such as expanding SSD lifetime, improving write performance, and reducing garbage collection overhead~\cite{Kim2012Deduplication}.
 
 
-\emph{Approximate} deduplication systems (as opposed to \emph{exact} deduplication) do not search for uncached fingerprints on disk~\cite{lillibridge2009sparse,bhagwat2009extreme,xia2011silo}, which reduces disk I/O during deduplication but at the expense of disk space. This family of methods includes sparse indexing \cite{lillibridge2009sparse} and extreme binning \cite{bhagwat2009extreme} (see also SiLo \cite{xia2011silo}).  However, the lazy and eager methods perform exact deduplication, and consequently make on-disk lookups, so they are both slower than approximate methods.  But unlike the eager method, the lazy method merges on-disk lookups. Approximate deduplication is most beneficial when the main memory is large enough to hold all the samples. Lazy deduplication aims at reducing on-disk fingerprint lookup, which ordinarily cannot benefit approximate deduplication. However, when the samples spill onto the disk, approximate deduplication can use the lazy method to deal with the on-disk part. It's plausible, therefore, that approximate deduplication could likewise benefit from the lazy method, although we do not explore this idea in this paper.
+\emph{Approximate} deduplication systems (as opposed to \emph{exact} deduplication) do not search for uncached fingerprints on disk~\cite{lillibridge2009sparse,bhagwat2009extreme,xia2011silo}, which reduces disk I/O during deduplication but at the expense of disk space. This family of methods includes sparse indexing \cite{lillibridge2009sparse} and extreme binning \cite{bhagwat2009extreme} (see also SiLo \cite{xia2011silo}).  However, the lazy and eager methods perform exact deduplication, and consequently make on-disk lookups, so they are both slower than approximate methods.  But unlike the eager method, the lazy method merges on-disk lookups. Approximate deduplication is most beneficial when the main memory is large enough to hold all the samples. Lazy deduplication aims at reducing on-disk fingerprint lookup, which ordinarily cannot benefit approximate deduplication. However, when the samples spill onto the disk, approximate deduplication can use the lazy method to deal with the on-disk part. It's plausible, therefore, that approximate deduplication could likewise benefit from the lazy method, although we do not explore this idea in this article.
 
 
 \section{Lazy deduplication}
@@ -156,7 +156,8 @@ Storing fingerprints on solid-state drives SSDs (instead of hard disk drives) ca
 
 \subsection{Fingerprint identification}
 
-A flowchart of the fingerprint identification process of lazy deduplication is given in Figure~\ref{fig:flow-lazy}.  We use a Bloom filter in the lazy method to filter out previously unseen (unique) fingerprints for which we can bypass caching and buffering, and immediately write to disk. In our experiments with 1GB Bloom filter, we found all the unique fingerprints are filtered out except for FSLHomes, which resulted in a low false positive rate of $1.14\times 10^{-9}$ (counting a single false positive; see Table~\ref{tab:bloom-filter} for further experimental results). Figure~\ref{fig:bloom-filter} shows a false positive example of Bloom filter.
+A flowchart of the fingerprint identification process of lazy deduplication is given in Figure~\ref{fig:flow-lazy}.  We use a Bloom filter in the lazy method to filter out previously unseen (unique) fingerprints for which we can bypass caching and buffering, and immediately write to disk. In our experiments with 1GB Bloom filter, we found all the unique fingerprints are filtered out except for FSLHomes, which resulted in a low false positive rate of $1.14\times 10^{-9}$ (counting a single false positive; see Table~\ref{tab:bloom-filter} for further experimental results).
+%Figure~\ref{fig:bloom-filter} shows a false positive example of Bloom filter.
 
 Fingerprints which pass through the Bloom filter are first looked up in the cache, which we refer to as \emph{pre-lookup}, and fingerprints not in the cache are buffered.  Finding a fingerprint as a result of an on-disk lookup triggers prefetching, after which some of the fingerprints in the buffer are looked up in the cache, referred to as \emph{post-lookup}.
 
@@ -207,7 +208,8 @@ Pre-lookup exploits repeated fingerprints occurring in close proximity within th
   \label{fig:flow-lazy}
 \end{figure}
 
-
+\iffalse
+% the iffalse removes the bloom filter figure.
 \begin{figure}[htbp]
 \centering
 
@@ -261,6 +263,8 @@ Pre-lookup exploits repeated fingerprints occurring in close proximity within th
   \label{fig:bloom-filter}
 \end{figure}
 
+\fi
+
 
 \subsection{Fingerprint management}
 
@@ -290,7 +294,7 @@ To buffer the fingerprints, the lazy method requires additional memory space, an
  &=(S_\text{fp}+S_\text{chk})n T.
 \end{align*}
 
-If e.g.\ SHA1 is the fingerprint algorithm and we set the average chunk size to $4$KB, which are typical in deduplication systems, the number of hash buckets $n=1024$, and BFT is set to $32$, then $\mathrm{Space} \simeq 128$MB, not a huge cost on modern hardware.
+If e.g.,\ SHA1 is the fingerprint algorithm and we set the average chunk size to $4$KB, which are typical in deduplication systems, the number of hash buckets $n=1024$, and BFT is set to $32$, then $\mathrm{Space} \simeq 128$MB, acceptable cost on modern hardware.
 
 
 An entry in an on-disk hash bucket will have size around $40$B, comprising of the fingerprint itself, a pointer to the corresponding metadata entry and some other information. (The entry size will depend on the choice of cryptographic hash function and the size of the pointers.)  A $4$MB hash bucket can therefore contain around $100{,}000$ entries, and, assuming there's a single $4$MB hash bucket in each hash index slot, the whole on-disk hash table can support $1024 \times 100,000 \times 4\text{KB} \simeq 400$GBs of unique data.  With a BFT set to $32$, the buffer will have at most $32 \times 1024$ fingerprints in it at a given time, for which we need to reserve at least $32 \times 1024 \times 4\text{KB}=128$MBs of memory for storing the corresponding chunks. This guarantees the system identifies $32$ fingerprints per disk I/O.
@@ -474,7 +478,7 @@ This caching strategy introduces two issues: (a) we need to decide which fingerp
 \label{fig:cache-lazy}
 \end{figure}
 
-In addition to the hash table, fingerprints that reach the buffer are inserted into a \emph{buffer cycle}, a cyclic data structure where pointers indicate the previous and next fingerprints in the cycle.   They are also stored with a number $r$, which we call the \emph{rank}, which gives the order in which fingerprints arrives.  The first fingerprint in a cycle has rank $0$ and the subsequent fingerprints have rank $1,2,\ldots$, including both unique and duplicate fingerprints.  This is illustrated in Figure~\ref{fig:list-buffer}. Algorithm~\ref{alg:circle} gives the procedure how to construct the buffer cycle.
+In addition to the hash table, fingerprints that reach the buffer are inserted into a \emph{buffer cycle}, a cyclic data structure where pointers indicate the previous and next fingerprints in the cycle.   They are also stored with a number $r$, which we call the \emph{rank}, which gives the order in which fingerprints arrive.  The first fingerprint in a cycle has rank $0$ and the subsequent fingerprints have rank $1,2,\ldots$, including both unique and duplicate fingerprints.  This is illustrated in Figure~\ref{fig:list-buffer}. Algorithm~\ref{alg:circle} gives the procedure how to construct the buffer cycle.
 
 % Algorithm
 \begin{algorithm}[htbp]
@@ -710,7 +714,7 @@ The benefits of offloading SHA1 calculation instead of chunking to the GPU are:
 \begin{itemize}
 \item The GPU hardware is not efficient for applications with intensive branch instructions or data synchronization since it is not allowable for the threads of the same thread block to concurrently jump to different branches~\cite{li2013a}.
 
-\item The input size of chunking process is larger (chunking is the process which segments large data blocks into small, closely sized chunks. In our experimental configuration, we use a 96MB data block (as might arise in a deduplication data stream) to a chunking thread, which would be too large for a single GPU thread. Moreover, chunking is an inherently serial process, in that chunk boundaries influence one another. SHA1 calculation for the already-computed chunks is far simpler to parallelize since the chunks are of similar sizes, so the task sizes are better balanced.
+\item The input size of chunking process is larger (chunking is the process which segments large data blocks into small, closely sized chunks). In our experimental configuration, we use a 96MB data block (as might arise in a deduplication data stream) to a chunking thread, which would be too large for a single GPU thread. Moreover, chunking is an inherently serial process, in that chunk boundaries influence one another. SHA1 calculation for the already-computed chunks is far simpler to parallelize since the chunks are of similar sizes, so the task sizes are better balanced.
 
 \end{itemize}
 
@@ -718,12 +722,12 @@ The benefits of offloading SHA1 calculation instead of chunking to the GPU are:
 
 Data deduplication is both computationally intensive and I/O intensive.  With lazy deduplication, we reduce the I/O component (primarily fingerprint identification) to the extent that the computational component becomes the new bottleneck (primarily computing the chunks and calculating their fingerprints).  If we improve only one of these components (or even if we eliminate it entirely), Ahmdal's Law gives a theoretical limit on the benefit.
 
-Figure~\ref{fig:balance-pie} shows the proportion of time spent on computation in lazy deduplication as we introduce GPU fingerprinting and multi-threaded chunking on the CPU. We use the FSLHomes (which we use for experiments; see Section~\ref{se:exp_det}) as an example. We use the data from Tables~\ref{tab:disk-bar}, ~\ref{tab:gpu} and Figure~\ref{fig:chunk-speed}. This figure shows the bottleneck stage in each optimizing step.
+Figure~\ref{fig:balance-pie} shows the proportion of time spent on computation in lazy deduplication as we introduce GPU fingerprinting and multi-threaded chunking on the CPU. We use the FSLHomes~\cite{tarasov2012generating} (which we use for experiments; see Section~\ref{se:exp_det}) as an example. We use the data from Tables~\ref{tab:disk-bar}, ~\ref{tab:gpu} and Figure~\ref{fig:chunk-speed}. This figure shows the bottleneck stage in each optimizing step.
 
-Using the lazy method, disk I/O is reduced. As a consequence, the identification component only takes 13\% of the deduplication time. Chunking and hashing consume larger proportions of the deduplication time, especially chunking which takes over half (53\%) of the entire time. So it is impossible for the overall throughput to exceeds the chunking throughput, which is only 217MB/sec..
+Using the lazy method, disk I/O is reduced. As a consequence, the identification component only takes 13\% of the deduplication time. Chunking and hashing consume larger proportions of the deduplication time, especially chunking which takes over half (53\%) of the entire time. So it is impossible for the overall throughput to exceed the chunking throughput, which is only 217MB/sec..
 
-Tough fingerprinting takes less proportion of the time than chunking, it is one potential bottleneck. We offload the hash calculation to GPU, which doesn't wholly eliminate the fingerprinting component, but reduces it to 10\%.  Chunking remains the bottleneck, taking 74\% of the deduplication time. The throughput still can not exceeds the chunking throughput.
-So we use multiple CPU threads to perform chunking, dropping this component to 39\%. After that, the time spent on each stage is close and the system reaches a relative balance.
+Tough fingerprinting takes less proportion of the time than chunking, it is one potential bottleneck. We offload the hash calculation to GPU, which doesn't wholly eliminate the fingerprinting component, but reduces it to 10\%.  Chunking remains the bottleneck, taking 74\% of the deduplication time. The throughput still can not exceed the chunking throughput.
+So we use multiple CPU threads to perform chunking, dropping this component to 39\%. After that, the time spent on each stage is close and the system reaches a relative balance. This means that the CPU, GPU and the disk work simultaneously and the resources are relatively fully used.
 
 The other two data sets (Vm and Src) also show similar trend.
 
@@ -757,7 +761,7 @@ The other two data sets (Vm and Src) also show similar trend.
 \end{tikzpicture}
 }
 
-\caption{How the load balance changes as we introduce (a) GPU fingerprinting and (b) CPU multi-thread chunking into lazy deduplication.}
+\caption{How the execution time balance changes as we introduce (a) GPU fingerprinting and (b) CPU multi-thread chunking into lazy deduplication.}
 \label{fig:balance-pie}
 \end{figure}
 
@@ -800,7 +804,7 @@ In our implementation, the cache is organized into a hash table with collision l
 
 \subsection{Deduplication pipeline}
 
-We use multiple CPU threads and a GPU to accelerate chunking and fingerprinting. The system creates $8$ chunking threads (equal to the the number of logical CPU processors on our platform), each for processing data in $96$MB blocks. On fingerprint calculation, the system transfers batches of $4096$ chunks to the GPU (to closely match the GPU's $3584$ cores). The GPU assigns a thread to each data chunk in a batch to calculate its fingerprint, and then transfers the batch of fingerprints from the GPU to the main memory.  Identification picks out the redundant fingerprints, which are buffered for later processing. Though all the stages except fingerprinting run on the CPU, only chunking is computing-intensive. Fingerprint identification is instead disk-I/O-intensive.
+We use multiple CPU threads and a GPU to accelerate chunking and fingerprinting. The system creates $8$ chunking threads (equal to the the number of logical CPU processors on our platform), each for processing data in $96$MB blocks. On fingerprint calculation, the system transfers batches of $4096$ chunks to the GPU (to closely match the GPU's $3584$ cores). The GPU assigns a thread to each data chunk in a batch to calculate its fingerprint, and then transfers the batch of fingerprints from the GPU to the main memory.  Identification picks out the redundant fingerprints, which are buffered for later processing. Though all the stages except fingerprinting run on the CPU, only chunking is computationally intensive. Fingerprint identification is instead disk-I/O-intensive.
 
 Though multi-threading and using a GPU can improve the chunking and hash calculation procedures directly, they can also perform these tasks in parallel to one another via pipelining. Figure~\ref{fig:pipeline} illustrates how each stage executes in parallel. In our deduplicaton implementation, we divide the process into 4 stages, namely chunking, fingerprinting, identification, and storage\footnote{In our deduplicaton implementation, we don't actually store the chunks, so it consumes no CPU resources.}.  Importantly, these components are approximately time-balanced (see Figure~\ref{fig:balance-pie}), which helps pipelining to avoid idle time.  By organizing the workload onto three devices, the CPU, GPU, and disk, which can operate simultaneously, the time spent can overlap with each other. 
 
@@ -871,7 +875,7 @@ Though multi-threading and using a GPU can improve the chunking and hash calcula
 
 We measure \emph{deduplication time} which we define as,  for a given data set, the time it takes to classify pre-computed fingerprints as ``unique'' or ``duplicate''.
 
-When measuring deduplication time, the process is simulated, in that we do not include the time for chunking, fingerprinting, and writing data chunks to disk. In this way, we focus on fingerprint lookup performance.  Reading the data from disk and writing the unique data chunks to disk will affect deduplication performance, but disk storage methods are instead chosen to optimize the system's online performance, and go beyond the scope of this paper. We compare the deduplication time of the lazy method to the eager method.
+When measuring deduplication time, the process is simulated, in that we do not include the time for chunking, fingerprinting, and writing data chunks to disk. In this way, we focus on fingerprint lookup performance.  Reading the data from disk and writing the unique data chunks to disk will affect deduplication performance, but disk storage methods are instead chosen to optimize the system's online performance, and go beyond the scope of this article. We compare the deduplication time of the lazy method to the eager method.
 
 We also investigate \emph{deduplication throughput}, where we include chunking and fingerprint calculation time (except for the FSLHomes data set, where we only have access to fingerprints).  Note that the GPU and CPU parallelism is used to speed up chunking and fingerprint calculation (except for FSLHomes).
 
@@ -1071,7 +1075,7 @@ total dedup. & $282$ & $151$ & $476$ & $226$ & $5824$ & $3939$\\
 \label{tab:disk-bar}
 \end{table}
 
-The time consumed by on-disk lookups is reduced by around $64\%$ to $89\%$. As a result, its proportional contribution to the total time is also significantly reduced: in eager deduplication, on-disk fingerprint lookup alone takes over $62\%$ to $84\%$ of the total time, which drops to $13\%$ to $42\%$ using the lazy method.  This is precisely what lazy deduplication was designed to achieve.
+The time consumed by on-disk lookups is reduced by $64\%$ to $89\%$. As a result, its proportional contribution to the total time is also significantly reduced: in eager deduplication, on-disk fingerprint lookup alone takes over $62\%$ to $84\%$ of the total time, which drops to $13\%$ to $42\%$ using the lazy method.  This is precisely what lazy deduplication was designed to achieve.
 
 
 \subsection{Bloom filter size}\label{se:Bloom}
@@ -1218,13 +1222,13 @@ The results on our HDD are shown in Figure~\ref{fig:overall-HDD}. The improvemen
 \section{Concluding remarks}
 \label{sec:conclusion}
 
-In this paper, we describe a ``lazy'' method for data deduplication. It buffers incoming fingerprints until the number of fingerprints in a hash bucket reaches a threshold, after which they are jointly searched for on disk within a restricted search space.  We also design a caching strategy which reaches a high cache hit rate and avoids unnecessary cache lookups for fingerprints in the buffer area.  Experimental results indicate that this method can be used to significantly reduce the time for on-disk fingerprint lookup, by up to $70\%$ on SSDs and over $85\%$ on HDDs.
+In this article, we describe a ``lazy'' method for data deduplication. It buffers incoming fingerprints until the number of fingerprints in a hash bucket reaches a threshold, after which they are jointly searched for on disk within a restricted search space.  We also design a caching strategy which reaches a high cache hit rate and avoids unnecessary cache lookups for fingerprints in the buffer area.  Experimental results indicate that this method can be used to significantly reduce the time for on-disk fingerprint lookup, by up to $70\%$ on SSDs and over $85\%$ on HDDs.
 
 We propose some future research directions:
 \begin{itemize}
  \item The lazy method would improve the performance of garbage collection in deduplication, since we can batch check the fingerprints to determine whether or not chunks are valid. It would be interesting to explore how much of an effect the lazy method has on garbage collection.
  \item Many key-value stores and object-oriented storage systems use a ``key'' to track the data blocks or objects. In this setting, we can sacrifice response time to improve throughput, and it would be interesting to investigate this trade-off in the context of lazy deduplication.
- \item It would also be worthwhile exploring the compatibility of lazy deduplication with commonly used data storage methods, to see when it is most effective.
+ \item It would also be worthwhile exploring the compatibility of lazy deduplication with commonly used data storage methods (e.g., RAID), to see when it is most effective.
  \item The computation and I/O components are not completely balanced, so there is room for improvement via more sophisticated load balancing methods, for example by moving part of chunking computation to the GPU.
 \end{itemize}
 
@@ -1243,7 +1247,7 @@ Also, as the lazy method buffers both fingerprints and chunks, there is a proble
                              % Gerry Murray - March 2012
 
 % History dates
-\received{February 2007}{March 2009}{June 2009}
+\received{November 2016}{March 2017}{March 2017}
 
 % Electronic Appendix
 %\elecappendix
